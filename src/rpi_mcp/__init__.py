@@ -1,0 +1,1 @@
+"""MCP tools for operating Raspberry Pi hosts through SSH."""
