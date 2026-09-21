@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "raspberry-pi-ssh": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${workspaceFolder}",
+        "run",
+        "rpi-mcp"
+      ]
+    }
+  }
+}
