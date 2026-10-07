@@ -83,6 +83,15 @@ The service and power tools use `sudo -n`, which refuses a password prompt.
 Grant only the exact `systemctl` actions needed in a Pi-specific sudoers file;
 do not grant `NOPASSWD: ALL`.
 
+If a Pi's sudo requires a password (for example, a Raspberry Pi 5 whose
+image does not grant `NOPASSWD`), set `RPI_MCP_RPI5_SUDO_PASSWORD` or
+`RPI_MCP_RPI3_SUDO_PASSWORD`. Those tools then run `sudo -S -p ''` and write
+the password to the SSH process's stdin, so it never appears in a local or
+remote command line, process listing, or tool result. The password is read
+verbatim from the environment and cannot contain line breaks. `run_command`
+does not receive it. Keep the configuration file private; a scoped
+`NOPASSWD` sudoers entry remains the preferred setup.
+
 ## One-time Pi setup
 
 On each Pi, enable the SSH service:

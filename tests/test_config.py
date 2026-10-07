@@ -56,3 +56,29 @@ def test_load_settings_rejects_an_invalid_boolean() -> None:
                 "RPI_MCP_ENABLE_COMMANDS": "sometimes",
             }
         )
+
+def test_load_settings_keeps_sudo_passwords_per_device_and_out_of_output() -> None:
+    settings = load_settings(
+        {
+            "RPI_MCP_RPI5_HOST": "192.0.2.5",
+            "RPI_MCP_RPI3_HOST": "192.0.2.3",
+            "RPI_MCP_RPI5_SUDO_PASSWORD": " s3cret ",
+        }
+    )
+
+    rpi5 = settings.device("rpi5")
+    assert rpi5.sudo_password == " s3cret "
+    assert settings.device("rpi3bplus").sudo_password is None
+    assert "s3cret" not in repr(rpi5)
+    assert "s3cret" not in str(rpi5.as_dict())
+
+
+def test_load_settings_rejects_a_multiline_sudo_password() -> None:
+    with pytest.raises(ConfigurationError, match="cannot contain line breaks"):
+        load_settings(
+            {
+                "RPI_MCP_RPI5_HOST": "192.0.2.5",
+                "RPI_MCP_RPI3_HOST": "192.0.2.3",
+                "RPI_MCP_RPI5_SUDO_PASSWORD": "first\nsecond",
+            }
+        )

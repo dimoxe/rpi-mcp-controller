@@ -74,7 +74,12 @@ class SSHExecutor:
         self._run = run
 
     def execute(
-        self, device: Device, remote_command: str, *, timeout_seconds: int | None = None
+        self,
+        device: Device,
+        remote_command: str,
+        *,
+        timeout_seconds: int | None = None,
+        stdin: str | None = None,
     ) -> SSHResult:
         if "\x00" in remote_command:
             raise ValueError("Remote commands cannot contain null bytes.")
@@ -87,9 +92,16 @@ class SSHExecutor:
 
         timeout = timeout_seconds or self._settings.command_timeout_seconds
         command = build_ssh_command(executable, self._settings, device, remote_command)
+        # Secrets such as a sudo password travel over stdin, never through argv.
+        # Otherwise ssh must not inherit this process's stdin: under the stdio
+        # transport that is the MCP message stream, which ssh would consume.
+        stdin_options: dict[str, object] = (
+            {"stdin": subprocess.DEVNULL} if stdin is None else {"input": stdin}
+        )
         try:
             completed = self._run(
                 command,
+                **stdin_options,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

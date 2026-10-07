@@ -1,3 +1,4 @@
+import subprocess
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -66,6 +67,7 @@ def test_executor_returns_command_output_without_a_local_shell() -> None:
     assert result.as_dict()["ok"] is True
     assert result.stdout == "Linux\n"
     assert captured["kwargs"] == {
+        "stdin": subprocess.DEVNULL,
         "capture_output": True,
         "text": True,
         "encoding": "utf-8",
@@ -73,3 +75,24 @@ def test_executor_returns_command_output_without_a_local_shell() -> None:
         "timeout": 30,
         "check": False,
     }
+
+def test_executor_passes_stdin_to_ssh_instead_of_argv() -> None:
+    settings = load_settings(
+        {
+            "RPI_MCP_RPI5_HOST": "192.0.2.5",
+            "RPI_MCP_RPI3_HOST": "192.0.2.3",
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> SimpleNamespace:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    SSHExecutor(settings, ssh_executable="ssh", run=fake_run).execute(
+        settings.device("rpi5"), "sudo -S true", stdin="s3cret\n"
+    )
+
+    assert captured["kwargs"]["input"] == "s3cret\n"
+    assert "s3cret" not in str(captured["args"])

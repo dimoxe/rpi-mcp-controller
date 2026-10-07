@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -36,6 +36,7 @@ class Device:
     architecture: str
     username: str
     port: int
+    sudo_password: str | None = field(default=None, repr=False, compare=False)
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -101,6 +102,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
                 "arm64",
                 _username(_value(values, "RPI_MCP_RPI5_SSH_USER", "pi"), "RPI_MCP_RPI5_SSH_USER"),
                 _integer(values, "RPI_MCP_RPI5_SSH_PORT", 22, minimum=1, maximum=65535),
+                _secret(values, "RPI_MCP_RPI5_SUDO_PASSWORD"),
             ),
             Device(
                 "rpi3bplus",
@@ -109,6 +111,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
                 "arm32",
                 _username(_value(values, "RPI_MCP_RPI3_SSH_USER", "pi"), "RPI_MCP_RPI3_SSH_USER"),
                 _integer(values, "RPI_MCP_RPI3_SSH_PORT", 22, minimum=1, maximum=65535),
+                _secret(values, "RPI_MCP_RPI3_SUDO_PASSWORD"),
             ),
         ),
         identity_file=_optional_path(values, "RPI_MCP_SSH_IDENTITY_FILE"),
@@ -157,6 +160,16 @@ def _integer(
     if not minimum <= parsed <= maximum:
         raise ConfigurationError(f"{name} must be between {minimum} and {maximum}.")
     return parsed
+
+
+def _secret(values: Mapping[str, str], name: str) -> str | None:
+    # Passwords are kept verbatim: surrounding whitespace may be significant.
+    value = values.get(name, "")
+    if not value:
+        return None
+    if "\n" in value or "\r" in value or "\x00" in value:
+        raise ConfigurationError(f"{name} cannot contain line breaks or null bytes.")
+    return value
 
 
 def _optional_path(values: Mapping[str, str], name: str) -> Path | None:

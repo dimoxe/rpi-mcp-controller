@@ -45,13 +45,28 @@ mcp = MCPServer(
 
 
 def execute_remote(
-    settings: Settings, device: Device, command: str, *, timeout_seconds: int | None = None
+    settings: Settings,
+    device: Device,
+    command: str,
+    *,
+    timeout_seconds: int | None = None,
+    stdin: str | None = None,
 ) -> dict[str, object]:
     """Run a remote command through the common SSH transport."""
 
     return SSHExecutor(settings).execute(
-        device, command, timeout_seconds=timeout_seconds
+        device, command, timeout_seconds=timeout_seconds, stdin=stdin
     ).as_dict()
+
+
+def execute_sudo(settings: Settings, device: Device, command: str) -> dict[str, object]:
+    """Run a command as root, answering sudo's password prompt only when one is configured."""
+
+    if device.sudo_password is None:
+        return execute_remote(settings, device, f"sudo -n {command}")
+    return execute_remote(
+        settings, device, f"sudo -S -p '' {command}", stdin=f"{device.sudo_password}\n"
+    )
 
 
 @mcp.tool()
@@ -120,8 +135,8 @@ def control_service(
     _require_commands_enabled(settings)
     service_name = _validate_service_name(service)
     service_action = _validate_action("action", action, _SERVICE_ACTIONS)
-    command = f"sudo -n systemctl {service_action} {shlex.quote(service_name)}"
-    return execute_remote(settings, settings.device(device), command)
+    command = f"systemctl {service_action} {shlex.quote(service_name)}"
+    return execute_sudo(settings, settings.device(device), command)
 
 
 @mcp.tool()
@@ -154,8 +169,7 @@ def power_action(
     if confirm != "CONFIRM":
         raise ValueError("Set confirm to CONFIRM to run a power action.")
     power_command = _validate_action("action", action, _POWER_ACTIONS)
-    command = f"sudo -n systemctl {power_command}"
-    return execute_remote(settings, settings.device(device), command)
+    return execute_sudo(settings, settings.device(device), f"systemctl {power_command}")
 
 
 def _validate_service_name(service: str) -> str:
