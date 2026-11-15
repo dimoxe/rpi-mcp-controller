@@ -82,3 +82,11 @@ def test_load_settings_rejects_a_multiline_sudo_password() -> None:
                 "RPI_MCP_RPI5_SUDO_PASSWORD": "first\nsecond",
             }
         )
+
+
+def test_run_command_sudo_is_a_separate_opt_in() -> None:
+    base = {"RPI_MCP_RPI5_HOST": "192.0.2.5", "RPI_MCP_RPI3_HOST": "192.0.2.3"}
+
+    assert load_settings(base).run_command_sudo_enabled is False
+    enabled = load_settings({**base, "RPI_MCP_ENABLE_RUN_COMMAND_SUDO": "1"})
+    assert enabled.run_command_sudo_enabled is True

@@ -88,9 +88,27 @@ image does not grant `NOPASSWD`), set `RPI_MCP_RPI5_SUDO_PASSWORD` or
 `RPI_MCP_RPI3_SUDO_PASSWORD`. Those tools then run `sudo -S -p ''` and write
 the password to the SSH process's stdin, so it never appears in a local or
 remote command line, process listing, or tool result. The password is read
-verbatim from the environment and cannot contain line breaks. `run_command`
-does not receive it. Keep the configuration file private; a scoped
-`NOPASSWD` sudoers entry remains the preferred setup.
+verbatim from the environment and cannot contain line breaks. Keep the
+configuration file private; a scoped `NOPASSWD` sudoers entry remains the
+preferred setup.
+
+`run_command` receives the password only when `RPI_MCP_ENABLE_RUN_COMMAND_SUDO=1`
+is also set, and only for commands that contain `sudo`. The server then prepends
+a short shell prelude that reads the password from the first line of SSH stdin,
+stores it in an owner-only temporary directory (under `XDG_RUNTIME_DIR`, a
+tmpfs, when available), and defines a `sudo` shell function that calls
+`sudo -A` with that directory's `SUDO_ASKPASS` helper. The directory is removed
+when the command's shell exits. Because the password never goes through the
+command's own stdin, pipelines such as `echo text | sudo tee /etc/file` work
+and a sudo that needs no password cannot pass it on to the command. Only a
+`sudo` that the shell invokes directly is covered; `xargs sudo` or a script
+that calls sudo is not, so wrap such steps in `sudo sh -c '...'`. This opt-in
+lets the MCP client run any command as root, so enable it only together with
+`RPI_MCP_ENABLE_COMMANDS=1` in a trusted session.
+
+Agents get usage notes for `run_command` (non-interactive execution, plain
+`sudo`, `&&` chaining, the 120-second timeout) through the MCP server
+instructions and the tool description.
 
 ## One-time Pi setup
 

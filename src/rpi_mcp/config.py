@@ -60,6 +60,7 @@ class Settings:
     command_timeout_seconds: int
     commands_enabled: bool
     power_actions_enabled: bool
+    run_command_sudo_enabled: bool = False
 
     def device(self, name: str) -> Device:
         normalized_name = name.lower()
@@ -124,6 +125,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         commands_enabled=_boolean(values, "RPI_MCP_ENABLE_COMMANDS", False),
         power_actions_enabled=_boolean(values, "RPI_MCP_ENABLE_POWER_ACTIONS", False),
+        run_command_sudo_enabled=_boolean(values, "RPI_MCP_ENABLE_RUN_COMMAND_SUDO", False),
     )
 
 

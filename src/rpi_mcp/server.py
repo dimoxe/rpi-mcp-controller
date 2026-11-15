@@ -18,6 +18,46 @@ _MAX_LOG_LINES = 500
 _MAX_COMMAND_LENGTH = 4_096
 _SERVICE_ACTIONS = frozenset({"start", "stop", "restart"})
 _POWER_ACTIONS = frozenset({"reboot", "shutdown"})
+_SUDO_WORD_RE = re.compile(r"(?<![\w.-])sudo(?![\w.-])")
+
+# Prepended to a run_command command that uses sudo when a password is configured.
+# The password arrives as the first line of SSH stdin, so it never appears in argv,
+# a process listing, or the environment of the command. It is written to an
+# owner-only directory (tmpfs under XDG_RUNTIME_DIR when available) and handed to
+# sudo through SUDO_ASKPASS, which leaves stdin free: pipelines such as
+# `echo x | sudo tee f` work, and a sudo that needs no password cannot leak it
+# into the command's stdin. The directory is removed when the shell exits.
+_SUDO_ASKPASS_PRELUDE = r"""IFS= read -r __rpi_mcp_pw || exit 125
+__rpi_mcp_dir=$(umask 077 && mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/rpi-mcp.XXXXXX") || exit 125
+trap 'rm -rf "$__rpi_mcp_dir"' EXIT
+trap 'rm -rf "$__rpi_mcp_dir"; exit 129' HUP
+trap 'rm -rf "$__rpi_mcp_dir"; exit 130' INT
+trap 'rm -rf "$__rpi_mcp_dir"; exit 143' TERM
+(umask 077 && printf '%s\n' "$__rpi_mcp_pw" > "$__rpi_mcp_dir/pw" && printf '#!/bin/sh\nexec cat "$(dirname -- "$0")/pw"\n' > "$__rpi_mcp_dir/askpass" && chmod 700 "$__rpi_mcp_dir/askpass") || exit 125
+unset __rpi_mcp_pw
+SUDO_ASKPASS="$__rpi_mcp_dir/askpass"
+export SUDO_ASKPASS
+sudo() { command sudo -A "$@"; }"""
+
+_AGENT_COMMAND_NOTES = """\
+How to run commands with run_command:
+- Commands run non-interactively over SSH in the SSH user's login shell. Stdin is
+  empty and there is no terminal: never run anything that prompts. Use flags such as
+  -y, --no-pager, or `sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y ...`.
+- For root, write plain `sudo <command>`. When the operator has enabled sudo for
+  run_command, the server supplies the password itself. Never put a password in a
+  command, and never use `sudo -S`, `sudo -A`, `sudo -n`, or `echo ... | sudo -S`.
+- Every `sudo` the shell invokes directly works, including several per command and
+  pipelines like `echo text | sudo tee /etc/file`. A sudo started by another program
+  (`xargs sudo`, `find -exec sudo`, a script) does not; wrap the whole step instead:
+  `sudo sh -c 'cd /srv/app && ./deploy.sh'`. Do not start the command with `exec`.
+- If stderr says "a terminal is required" or "a password is required", sudo is not
+  enabled for run_command on that Pi. Tell the operator; do not try workarounds.
+- `ok` and `exit_code` reflect only the last command of the shell line. Chain steps
+  with `&&` (or start with `set -e`) so a failed step is reported, and read stderr.
+- The timeout is at most 120 seconds. Start long jobs detached (for example
+  `docker compose up -d`, or `nohup cmd > /tmp/job.log 2>&1 &`) and poll their logs.
+"""
 
 _STATUS_COMMAND = """
 printf 'hostname: '; hostname
@@ -39,7 +79,8 @@ mcp = MCPServer(
     "Raspberry Pi SSH Controller",
     instructions=(
         "Use the named Raspberry Pi tools for status, logs, and services. "
-        "State-changing commands are disabled unless the operator explicitly enables them."
+        "State-changing commands are disabled unless the operator explicitly enables them.\n\n"
+        + _AGENT_COMMAND_NOTES
     ),
 )
 
@@ -67,6 +108,12 @@ def execute_sudo(settings: Settings, device: Device, command: str) -> dict[str, 
     return execute_remote(
         settings, device, f"sudo -S -p '' {command}", stdin=f"{device.sudo_password}\n"
     )
+
+
+def with_sudo_askpass(command: str) -> str:
+    """Prefix a shell command so its sudo calls read the password from SSH stdin."""
+
+    return f"{_SUDO_ASKPASS_PRELUDE}\n{command}"
 
 
 @mcp.tool()
@@ -139,7 +186,12 @@ def control_service(
     return execute_sudo(settings, settings.device(device), command)
 
 
-@mcp.tool()
+@mcp.tool(
+    description=(
+        "Run an arbitrary shell command on a Pi after the operator enables command "
+        "control.\n\n" + _AGENT_COMMAND_NOTES
+    )
+)
 def run_command(
     device: Literal["rpi5", "rpi3bplus"], command: str, timeout_seconds: int = 30
 ) -> dict[str, object]:
@@ -150,7 +202,20 @@ def run_command(
     if not command.strip() or "\x00" in command or len(command) > _MAX_COMMAND_LENGTH:
         raise ValueError(f"command must contain 1 to {_MAX_COMMAND_LENGTH} non-null characters.")
     timeout = _bounded_integer("timeout_seconds", timeout_seconds, minimum=1, maximum=120)
-    return execute_remote(settings, settings.device(device), command, timeout_seconds=timeout)
+    target = settings.device(device)
+    if (
+        settings.run_command_sudo_enabled
+        and target.sudo_password is not None
+        and _SUDO_WORD_RE.search(command)
+    ):
+        return execute_remote(
+            settings,
+            target,
+            with_sudo_askpass(command),
+            timeout_seconds=timeout,
+            stdin=f"{target.sudo_password}\n",
+        )
+    return execute_remote(settings, target, command, timeout_seconds=timeout)
 
 
 @mcp.tool()
